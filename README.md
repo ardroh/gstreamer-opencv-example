@@ -54,6 +54,19 @@ To use a fake source (test video):
 poetry run python pipeline.py --fake-source
 ```
 
+## Visualization
+
+### Initial State
+
+
+
+![Initial State](./resources/pipeline_initial.png)
+
+### Playing
+
+![Playing](./resources/pipeline_playing.png)
+
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

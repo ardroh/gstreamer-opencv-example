@@ -3,3 +3,4 @@
 *.dot
 *.png
 .venv
+!resources/*.png
