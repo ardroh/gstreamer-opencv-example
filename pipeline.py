@@ -6,7 +6,7 @@
 # attribution to the original author.
 
 import argparse
-from enum import Enum
+from dataclasses import dataclass
 import logging
 import os
 from typing import Optional
@@ -46,6 +46,10 @@ def main():
                         default=DEFAULT_RTSP_URI, help='Source URI for RTSP. Only used if input-mode is "rtsp".')
     parser.add_argument('--input-file', '-f', type=str,
                         help='File path for video file. Only used if input-mode is "file".')
+    parser.add_argument('--black-and-white', '--bw', action='store_true',
+                        help='Convert the video to black and white')
+    parser.add_argument('--timestamp', '--ts', action='store_true',
+                        help='Add timestamp to the video')
     parser.add_argument('--create-graph', action='store_true',
                         help='Create graph of the pipeline')
     parser.add_argument('--debug', action='store_true',
@@ -100,7 +104,7 @@ def main():
     appsrc = Gst.ElementFactory.make("appsrc", "opencv-src")
     appsrc.set_property("is-live", True)
     # Connect the new-sample signal
-    appsink.connect("new-sample", on_new_sample, appsrc)
+    appsink.connect("new-sample", on_new_sample, NewSampleContext(appsrc, ProcessFrameOptions(black_and_white=args.black_and_white, timestamp=args.timestamp)))
 
     # === CONVERTER FOR SINK ===
     # Converts the video stream to a format that can be used by the sink (autovideosink in this case).
@@ -267,7 +271,19 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
         raise ValueError(f"Invalid source class: {source_class}")
 
 
-def on_new_sample(sink: Gst.Element, appsrc: Gst.Element) -> Gst.FlowReturn:
+@dataclass
+class ProcessFrameOptions:
+    black_and_white: bool = True
+    timestamp: bool = True
+
+
+@dataclass
+class NewSampleContext:
+    appsrc: Gst.Element
+    process_frame_options: ProcessFrameOptions
+
+
+def on_new_sample(sink: Gst.Element, context: NewSampleContext) -> Gst.FlowReturn:
     """
     Callback function for handling new samples received by the appsink.
 
@@ -276,9 +292,9 @@ def on_new_sample(sink: Gst.Element, appsrc: Gst.Element) -> Gst.FlowReturn:
     logger.debug("New sample received from sink")
     sample = sink.emit("pull-sample")
     if sample:
-        new_sample = process_frame(sample)
+        new_sample = process_frame(sample, context.process_frame_options)
         if new_sample:
-            ret = appsrc.emit("push-sample", new_sample)
+            ret = context.appsrc.emit("push-sample", new_sample)
             if ret != Gst.FlowReturn.OK:
                 logger.error(f"Failed to push sample: {ret}")
             return Gst.FlowReturn.OK
@@ -287,7 +303,7 @@ def on_new_sample(sink: Gst.Element, appsrc: Gst.Element) -> Gst.FlowReturn:
     return Gst.FlowReturn.ERROR
 
 
-def process_frame(sample: Gst.Sample) -> Gst.Sample:
+def process_frame(sample: Gst.Sample, options: ProcessFrameOptions) -> Gst.Sample:
     """
     Process a video frame from the GStreamer pipeline.
 
@@ -320,17 +336,30 @@ def process_frame(sample: Gst.Sample) -> Gst.Sample:
             buffer=buffer,
             dtype=np.uint8
         )
-    # Convert to grayscale
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    # Convert back to RGB (but it will be black and white)
-    bw_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    if options.black_and_white:
+        # Convert to grayscale
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        # Convert back to RGB (but it will be black and white)
+        result_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    else:
+        result_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+
+    if options.timestamp:
+        # Get the current timestamp
+        timestamp = sample.get_buffer().pts / Gst.SECOND  # Convert from nanoseconds to seconds
+        timestamp_text = f"{int(timestamp // 3600):02}:{int((timestamp % 3600) // 60):02}:{int(timestamp % 60):02}"
+
+        # Add the timestamp as a subtitle to the image at the bottom left
+        font = cv2.FONT_HERSHEY_PLAIN
+        cv2.putText(result_img, timestamp_text, (10, height - 10), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
+
     # Create new caps for the processed frame
     new_caps = Gst.Caps.from_string(
         f"video/x-raw,format=RGB,width={width},height={
             height},framerate={DEFAULT_FRAMERATE}"
     )
     # Create a new Gst.Buffer
-    new_buf = Gst.Buffer.new_wrapped(bw_img.tobytes())
+    new_buf = Gst.Buffer.new_wrapped(result_img.tobytes())
     # Create a new sample with the processed buffer and new caps
     new_sample = Gst.Sample.new(new_buf, new_caps, None, None)
     return new_sample

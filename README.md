@@ -8,7 +8,7 @@ This project illustrates the process of capturing an RTSP stream, processing it 
   - RTSP (H.264)
   - Video file
   - Fake source (test video)
-- Processes frames using OpenCV (converts to grayscale).
+- Processes frames using OpenCV (converts to grayscale, adds timestamp).
 - Displays the processed video stream.
 - Supports both real RTSP sources and a test video source.
 
@@ -40,9 +40,8 @@ poetry run python pipeline.py
 
 ```
 $ poetry run python pipeline.py --help
-
 usage: pipeline.py [-h] [--input-mode {rtsp,file,fake}] [--src-uri SRC_URI] [--input-file INPUT_FILE]
-                   [--create-graph] [--debug]
+                   [--black-and-white] [--timestamp] [--create-graph] [--debug]
 
 Video processing pipeline
 
@@ -54,6 +53,9 @@ options:
                         Source URI for RTSP. Only used if input-mode is "rtsp".
   --input-file INPUT_FILE, -f INPUT_FILE
                         File path for video file. Only used if input-mode is "file".
+  --black-and-white, --bw
+                        Convert the video to black and white
+  --timestamp, --ts     Add timestamp to the video
   --create-graph        Create graph of the pipeline
   --debug               Enable debug logging
 ```
