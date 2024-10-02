@@ -112,7 +112,6 @@ def main():
     display_sink = Gst.ElementFactory.make('autovideosink', 'sink')
     display_sink.set_property("async-handling", True)
 
-    pipeline.add(converter_opencv)
     pipeline.add(appsink)
     pipeline.add(appsrc)
     pipeline.add(converter_display)
