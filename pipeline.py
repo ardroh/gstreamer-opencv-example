@@ -77,7 +77,7 @@ def main():
     else:
         raise ValueError(f"Invalid input mode: {args.input_mode}")
 
-    source_bin = configure_source_bin(source_class, pipeline, converter_opencv)
+    configure_source_bin(source_class, pipeline, converter_opencv)
 
     # === APPSINK ===
     # This sink will receive the decoded frames and push them for OpenCV processing.
@@ -203,15 +203,11 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
     Args:
         source_class (BaseSource): The source class to configure.
         pipeline (Gst.Pipeline): The pipeline to configure.
-
-    Returns:
-        Gst.Element: The final element of the source bin.
     """
     if isinstance(source_class, FakeSource):
         source = Gst.ElementFactory.make('videotestsrc', 'source')
         pipeline.add(source)
         Gst.Element.link(source, next_pad)
-        return source
     elif isinstance(source_class, RTSPSource):
         # === SOURCE ===
         # Reads the video stream from the RTSP server.
@@ -240,7 +236,6 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
         Gst.Element.link(h264_extractor, parser)
         Gst.Element.link(parser, decoder)
         Gst.Element.link(decoder, next_pad)
-        return decoder
     elif isinstance(source_class, FileSource):
         logger.info(f"Using file source: {source_class.file_path}")
         if not os.path.exists(source_class.file_path):
@@ -253,7 +248,6 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
         pipeline.add(source)
         pipeline.add(decoder)
         Gst.Element.link(source, decoder)
-        return decoder
     else:
         raise ValueError(f"Invalid source class: {source_class}")
 
