@@ -28,6 +28,7 @@ def setup_logging(debug=False):
                         format='%(asctime)s - %(levelname)s - %(message)s')
     return logging.getLogger(__name__)
 
+
 global logger
 logger = None
 
@@ -212,7 +213,8 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
         pipeline.add(videorate)
         videoscale = Gst.ElementFactory.make('videoscale', 'videoscale')
         pipeline.add(videoscale)
-        caps = Gst.Caps.from_string("video/x-raw, width=1280, height=720, framerate=30/1")
+        caps = Gst.Caps.from_string(
+            "video/x-raw, width=1280, height=720, framerate=30/1")
         caps_filter = Gst.ElementFactory.make("capsfilter", "caps-filter")
         caps_filter.set_property("caps", caps)
         pipeline.add(caps_filter)
@@ -251,7 +253,8 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
     elif isinstance(source_class, FileSource):
         logger.info(f"Using file source: {source_class.file_path}")
         if not os.path.exists(source_class.file_path):
-            raise FileNotFoundError(f"File not found: {source_class.file_path}")
+            raise FileNotFoundError(
+                f"File not found: {source_class.file_path}")
         source = Gst.ElementFactory.make('filesrc', 'file-source')
         source.set_property('location', source_class.file_path)
         decoder = Gst.ElementFactory.make('decodebin', 'decoder')
@@ -323,7 +326,8 @@ def process_frame(sample: Gst.Sample) -> Gst.Sample:
     bw_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
     # Create new caps for the processed frame
     new_caps = Gst.Caps.from_string(
-        f"video/x-raw,format=RGB,width={width},height={height},framerate={DEFAULT_FRAMERATE}"
+        f"video/x-raw,format=RGB,width={width},height={
+            height},framerate={DEFAULT_FRAMERATE}"
     )
     # Create a new Gst.Buffer
     new_buf = Gst.Buffer.new_wrapped(bw_img.tobytes())
