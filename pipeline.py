@@ -6,9 +6,10 @@
 # attribution to the original author.
 
 import argparse
+from enum import Enum
 import logging
 import os
-
+from typing import Optional
 import cv2
 import gi
 import numpy as np
@@ -37,10 +38,13 @@ Gst.init(None)
 
 def main():
     parser = argparse.ArgumentParser(description="Video processing pipeline")
-    parser.add_argument('--fake-source', action='store_true',
-                        help='Use fake source instead of RTSP')
+    parser.add_argument('--input-mode', '--im', type=str,
+                        choices=['rtsp', 'file', 'fake'], default='fake',
+                        help='Input mode for the pipeline')
     parser.add_argument('--src-uri', '-s', type=str,
-                        default=DEFAULT_RTSP_URI, help='Source URI for RTSP')
+                        default=DEFAULT_RTSP_URI, help='Source URI for RTSP. Only used if input-mode is "rtsp".')
+    parser.add_argument('--input-file', '-f', type=str,
+                        help='File path for video file. Only used if input-mode is "file".')
     parser.add_argument('--create-graph', action='store_true',
                         help='Create graph of the pipeline')
     parser.add_argument('--debug', action='store_true',
@@ -52,33 +56,28 @@ def main():
 
     pipeline = Gst.Pipeline.new('video-processing-pipeline')
 
-    if args.fake_source:
-        source = Gst.ElementFactory.make('videotestsrc', 'source')
-    else:
-        # === SOURCE ===
-        # Reads the video stream from the RTSP server.
-        # https://gstreamer.freedesktop.org/documentation/rtsp/rtspsrc.html?gi-language=c
-        source = Gst.ElementFactory.make('rtspsrc', 'rtsp-source')
-        source.set_property('location', args.src_uri)
-        # === H264 EXTRACTOR ===
-        # Extracts the H264 packets from the RTP stream.
-        # https://gstreamer.freedesktop.org/documentation/rtp/rtph264depay.html?gi-language=c
-        h264_extractor = Gst.ElementFactory.make(
-            'rtph264depay', 'h264-extractor')
-        # === PARSER ===
-        # Prepares the H264 packets into a format that can be used for decoding.
-        # https://gstreamer.freedesktop.org/documentation/videoparsersbad/h264parse.html?gi-language=c
-        parser = Gst.ElementFactory.make('h264parse', 'parser')
-        # === DECODER ===
-        # Decodes the H264 packets into a raw video frames for processing or displaying.
-        # https://gstreamer.freedesktop.org/documentation/videoparsersbad/h264parse.html?gi-language=c
-        decoder = Gst.ElementFactory.make('avdec_h264', 'decoder')
-
     # === CONVERTER FOR OPENCV ===
     # Converts the video stream to a format that can be used by the sink (OpenCV in this case).
     # https://gstreamer.freedesktop.org/documentation/videoconvertscale/videoconvert.html?gi-language=c#videoconvert-page
     converter_opencv = Gst.ElementFactory.make(
         'videoconvert', 'converter-opencv')
+    pipeline.add(converter_opencv)
+
+    source_class: Optional[BaseSource] = None
+    if args.input_mode == 'fake':
+        source_class = FakeSource()
+    elif args.input_mode == 'file':
+        if not args.input_file:
+            raise ValueError("File path is required for file input mode")
+        source_class = FileSource(args.input_file)
+    elif args.input_mode == 'rtsp':
+        if not args.src_uri:
+            raise ValueError("Source URI is required for RTSP input mode")
+        source_class = RTSPSource(args.src_uri)
+    else:
+        raise ValueError(f"Invalid input mode: {args.input_mode}")
+
+    source_bin = configure_source_bin(source_class, pipeline, converter_opencv)
 
     # === APPSINK ===
     # This sink will receive the decoded frames and push them for OpenCV processing.
@@ -113,33 +112,24 @@ def main():
     display_sink = Gst.ElementFactory.make('autovideosink', 'sink')
     display_sink.set_property("async-handling", True)
 
-    if not args.fake_source:
-        pipeline.add(source)
-        pipeline.add(h264_extractor)
-        pipeline.add(parser)
-        pipeline.add(decoder)
-    pipeline.add(converter_display)
     pipeline.add(converter_opencv)
     pipeline.add(appsink)
     pipeline.add(appsrc)
+    pipeline.add(converter_display)
     pipeline.add(display_sink)
 
-    # Link the elements
-    if args.fake_source:
-        Gst.Element.link(source, converter_opencv)
-    else:
-        # We can't link source directly because it creates pads dynamically
-        source.connect("pad-added", on_pad_added, h264_extractor)
-        Gst.Element.link(source, h264_extractor)
-        Gst.Element.link(h264_extractor, parser)
-        Gst.Element.link(parser, decoder)
-        Gst.Element.link(decoder, converter_opencv)
+    # converter_opencv is already linked to the source bin inside configure_source_bin()
     Gst.Element.link(converter_opencv, appsink)
     Gst.Element.link(appsrc, converter_display)
     Gst.Element.link(converter_display, display_sink)
 
     if args.create_graph:
         create_pipeline_graph(pipeline, "pipeline_initial")
+
+    bus = pipeline.get_bus()
+    bus.add_signal_watch()
+    bus.connect("message", on_bus_message, pipeline)
+    bus.connect("message::error", on_error, pipeline)
 
     # Start the pipeline
     ret = pipeline.set_state(Gst.State.PLAYING)
@@ -159,10 +149,6 @@ def main():
     if args.create_graph:
         create_pipeline_graph(pipeline, "pipeline_playing")
 
-    bus = pipeline.get_bus()
-    bus.add_signal_watch()
-    bus.connect("message", on_bus_message, pipeline)
-
     try:
         loop = GLib.MainLoop()
         loop.run()
@@ -170,6 +156,107 @@ def main():
         logger.info("Keyboard interrupt detected, stopping the pipeline")
     finally:
         pipeline.set_state(Gst.State.NULL)
+
+
+class BaseSource:
+    def __init__(self):
+        pass
+
+
+class FakeSource(BaseSource):
+    """
+    Fake source class (videotestsrc).
+    """
+
+    def __init__(self):
+        pass
+
+
+class RTSPSource(BaseSource):
+    """
+    RTSP source class.
+
+    Args:
+        src_uri (str): The URI of the RTSP server.
+    """
+
+    def __init__(self, src_uri: str):
+        self.src_uri = src_uri
+
+
+class FileSource(BaseSource):
+    """
+    File source class.
+
+    Args:
+        file_path (str): The path to the video file.
+    """
+
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+
+def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_pad: Gst.Element) -> Gst.Element:
+    """
+    Configure the source bin for the pipeline. All source elements will added to a pipeline and linked together.
+    The resulting source bin will be linked to the next pad of the pipeline.
+
+    Args:
+        source_class (BaseSource): The source class to configure.
+        pipeline (Gst.Pipeline): The pipeline to configure.
+
+    Returns:
+        Gst.Element: The final element of the source bin.
+    """
+    if isinstance(source_class, FakeSource):
+        source = Gst.ElementFactory.make('videotestsrc', 'source')
+        pipeline.add(source)
+        Gst.Element.link(source, next_pad)
+        return source
+    elif isinstance(source_class, RTSPSource):
+        # === SOURCE ===
+        # Reads the video stream from the RTSP server.
+        # https://gstreamer.freedesktop.org/documentation/rtsp/rtspsrc.html?gi-language=c
+        source = Gst.ElementFactory.make('rtspsrc', 'rtsp-source')
+        source.set_property('location', source_class.src_uri)
+        # === H264 EXTRACTOR ===
+        # Extracts the H264 packets from the RTP stream.
+        # https://gstreamer.freedesktop.org/documentation/rtp/rtph264depay.html?gi-language=c
+        h264_extractor = Gst.ElementFactory.make(
+            'rtph264depay', 'h264-extractor')
+        # === PARSER ===
+        # Prepares the H264 packets into a format that can be used for decoding.
+        # https://gstreamer.freedesktop.org/documentation/videoparsersbad/h264parse.html?gi-language=c
+        parser = Gst.ElementFactory.make('h264parse', 'parser')
+        # === DECODER ===
+        # Decodes the H264 packets into a raw video frames for processing or displaying.
+        # https://gstreamer.freedesktop.org/documentation/videoparsersbad/h264parse.html?gi-language=c
+        decoder = Gst.ElementFactory.make('avdec_h264', 'decoder')
+        source.connect("pad-added", on_pad_added_rtsp, h264_extractor)
+        pipeline.add(source)
+        pipeline.add(h264_extractor)
+        pipeline.add(parser)
+        pipeline.add(decoder)
+        Gst.Element.link(source, h264_extractor)
+        Gst.Element.link(h264_extractor, parser)
+        Gst.Element.link(parser, decoder)
+        Gst.Element.link(decoder, next_pad)
+        return decoder
+    elif isinstance(source_class, FileSource):
+        logger.info(f"Using file source: {source_class.file_path}")
+        if not os.path.exists(source_class.file_path):
+            raise FileNotFoundError(f"File not found: {source_class.file_path}")
+        source = Gst.ElementFactory.make('filesrc', 'file-source')
+        source.set_property('location', source_class.file_path)
+        decoder = Gst.ElementFactory.make('decodebin', 'decoder')
+        # Once capabilities are negotiated, the pad-added signal will be emitted.
+        decoder.connect("pad-added", on_pad_added_decodebin, next_pad)
+        pipeline.add(source)
+        pipeline.add(decoder)
+        Gst.Element.link(source, decoder)
+        return decoder
+    else:
+        raise ValueError(f"Invalid source class: {source_class}")
 
 
 def on_new_sample(sink: Gst.Element, appsrc: Gst.Element) -> Gst.FlowReturn:
@@ -240,7 +327,7 @@ def process_frame(sample: Gst.Sample) -> Gst.Sample:
     return new_sample
 
 
-def on_pad_added(src: Gst.Element, new_pad: Gst.Pad, h264_extractor: Gst.Element) -> None:
+def on_pad_added_rtsp(src: Gst.Element, new_pad: Gst.Pad, h264_extractor: Gst.Element) -> None:
     """
     Callback function for handling dynamically added pads.
 
@@ -269,6 +356,24 @@ def on_pad_added(src: Gst.Element, new_pad: Gst.Pad, h264_extractor: Gst.Element
             "Pad does not have 'application/x-rtp' with H264 encoding, ignoring.")
 
 
+def on_pad_added_decodebin(decoder: Gst.Element, new_pad: Gst.Pad, next_element: Gst.Element) -> None:
+    """
+    Callback function for handling dynamically added pads from decodebin.
+
+    Args:
+        decoder (Gst.Element): The decodebin element.
+        new_pad (Gst.Pad): The newly created pad.
+        next_element (Gst.Element): The next element to link to.
+    """
+    sink_pad = next_element.get_static_pad('sink')
+    if not sink_pad.is_linked():
+        ret = new_pad.link(sink_pad)
+        if ret == Gst.PadLinkReturn.OK:
+            logger.info("Pad linked successfully")
+        else:
+            logger.error(f"Pad link failed with error {ret}")
+
+
 def on_bus_message(bus, message, pipeline):
     """
     Callback function for handling messages from the GStreamer pipeline bus.
@@ -290,6 +395,17 @@ def on_bus_message(bus, message, pipeline):
     elif t == Gst.MessageType.STATE_CHANGED:
         old_state, new_state, pending_state = message.parse_state_changed()
         logger.info("State changed from %s to %s", old_state, new_state)
+    else:
+        logger.debug("Received message of type %s", t)
+
+
+def on_error(bus, message, pipeline):
+    """
+    Callback function for handling error messages from the GStreamer pipeline bus.
+    """
+    err, debug = message.parse_error()
+    logger.error("Error in the pipeline: %s: %s", err, debug)
+    pipeline.set_state(Gst.State.NULL)
 
 
 def create_pipeline_graph(pipeline, filename):
@@ -302,4 +418,10 @@ def create_pipeline_graph(pipeline, filename):
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"{e}")
+        import traceback
+        traceback_str = traceback.format_exc()
+        logger.debug(traceback_str)

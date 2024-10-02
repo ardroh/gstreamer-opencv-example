@@ -4,7 +4,10 @@ This project illustrates the process of capturing an RTSP stream, processing it 
 
 ## Features
 
-- Captures video from an RTSP source (H.264).
+- Supported input sources:
+  - RTSP (H.264)
+  - Video file
+  - Fake source (test video)
 - Processes frames using OpenCV (converts to grayscale).
 - Displays the processed video stream.
 - Supports both real RTSP sources and a test video source.
@@ -35,37 +38,62 @@ poetry run python pipeline.py
 
 ### Command-line options:
 
-- `--fake-source`: Use a test video source instead of RTSP
-- `--src-uri`: Specify the RTSP source URI (default: rtsp://127.0.0.1:8554/test)
-- `--create-graph`: Generate a visual representation of the GStreamer pipeline
-- `--debug`: Enable debug logging
+```
+$ poetry run python pipeline.py --help
+
+usage: pipeline.py [-h] [--input-mode {rtsp,file,fake}] [--src-uri SRC_URI] [--input-file INPUT_FILE]
+                   [--create-graph] [--debug]
+
+Video processing pipeline
+
+options:
+  -h, --help            show this help message and exit
+  --input-mode {rtsp,file,fake}, --im {rtsp,file,fake}
+                        Input mode for the pipeline
+  --src-uri SRC_URI, -s SRC_URI
+                        Source URI for RTSP. Only used if input-mode is "rtsp".
+  --input-file INPUT_FILE, -f INPUT_FILE
+                        File path for video file. Only used if input-mode is "file".
+  --create-graph        Create graph of the pipeline
+  --debug               Enable debug logging
+```
 
 ## Example
 
 To run with a custom RTSP source:
 
 ```bash
-poetry run python pipeline.py --src-uri rtsp://127.0.0.1:8554/test
+poetry run python pipeline.py --input-mode rtsp --src-uri rtsp://127.0.0.1:8554/test
 ```
 
 To use a fake source (test video):
 
 ```bash
-poetry run python pipeline.py --fake-source
+poetry run python pipeline.py --input-mode fake
+```
+
+To run with a video file:
+
+```bash
+poetry run python pipeline.py --input-mode file --input-file ./resources/test.mp4
 ```
 
 ## Visualization
 
-### Initial State
+To visualize the pipeline, run the script with the `--create-graph` option.
+
+### Initial State (RTSP)
 
 
+![Initial State](./docs/rtsp_pipeline_initial.png)
 
-![Initial State](./resources/pipeline_initial.png)
+### Playing (RTSP)
 
-### Playing
+![Playing](./docs/rtsp_pipeline_playing.png)
 
-![Playing](./resources/pipeline_playing.png)
+## Change Log
 
+See [CHANGELOG.md](./CHANGELOG.md) for details.
 
 ## License
 
