@@ -206,8 +206,20 @@ def configure_source_bin(source_class: BaseSource, pipeline: Gst.Pipeline, next_
     """
     if isinstance(source_class, FakeSource):
         source = Gst.ElementFactory.make('videotestsrc', 'source')
+        source.set_property('pattern', 0)
         pipeline.add(source)
-        Gst.Element.link(source, next_pad)
+        videorate = Gst.ElementFactory.make('videorate', 'videorate')
+        pipeline.add(videorate)
+        videoscale = Gst.ElementFactory.make('videoscale', 'videoscale')
+        pipeline.add(videoscale)
+        caps = Gst.Caps.from_string("video/x-raw, width=1280, height=720, framerate=30/1")
+        caps_filter = Gst.ElementFactory.make("capsfilter", "caps-filter")
+        caps_filter.set_property("caps", caps)
+        pipeline.add(caps_filter)
+        Gst.Element.link(source, videorate)
+        Gst.Element.link(videorate, videoscale)
+        Gst.Element.link(videoscale, caps_filter)
+        Gst.Element.link(caps_filter, next_pad)
     elif isinstance(source_class, RTSPSource):
         # === SOURCE ===
         # Reads the video stream from the RTSP server.
